@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Juego de Autos - 7 Carriles</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 4px solid #444;
+            background-color: #555;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        #gameOver {
+            position: absolute;
+            color: white;
+            font-size: 48px;
+            text-align: center;
+            text-shadow: 2px 2px 4px #000;
+            display: none;
+        }
+        #scoreDisplay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px #000;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameOver">GAME OVER<br><span style="font-size: 24px">Presiona ESPACIO para reiniciar</span></div>
+    <div id="scoreDisplay">Puntaje: 0</div>
+    <canvas id="gameCanvas" width="800" height="1000"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameOverDisplay = document.getElementById('gameOver');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+
+        // Configuración del juego
+        const roadWidth = 600; // Más ancho para 7 carriles
+        const laneCount = 7; // 7 carriles
+        const laneWidth = roadWidth / laneCount;
+        
+        // Auto del jugador
+        const carWidth = 40;
+        const carHeight = 70;
+        let carX = canvas.width / 2 - carWidth / 2;
+        const carY = canvas.height - carHeight - 20;
+        let carSpeed = 5;
+        let carLane = 3; // Comienza en el carril central (de 0 a 6)
+
+        // Autos enemigos
+        let enemies = [];
+        let enemySpeed = 3;
+        let score = 0;
+        let gameRunning = true;
+        let lastEnemyTime = 0;
+        let enemyFrequency = 1000; // ms entre autos enemigos (más frecuentes)
+
+        // Dibujar el auto del jugador
+        function drawCar() {
+            ctx.fillStyle = '#3498db';
+            ctx.fillRect(carX, carY, carWidth, carHeight);
+            
+            // Detalles del auto
+            ctx.fillStyle = '#2980b9';
+            // Ventanas
+            ctx.fillRect(carX + 5, carY + 5, carWidth - 10, carHeight / 3);
+            // Luces
+            ctx.fillRect(carX + 5, carY + carHeight - 15, 10, 10);
+            ctx.fillRect(carX + carWidth - 15, carY + carHeight - 15, 10, 10);
+        }
+
+        // Dibujar la carretera con 7 carriles
+        function drawRoad() {
+            // Asfalto
+            ctx.fillStyle = '#333';
+            ctx.fillRect(canvas.width / 2 - roadWidth / 2, 0, roadWidth, canvas.height);
+            
+            // Bordes de la carretera
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(canvas.width / 2 - roadWidth / 2 - 10, 0, 10, canvas.height);
+            ctx.fillRect(canvas.width / 2 + roadWidth / 2, 0, 10, canvas.height);
+            
+            // Líneas divisorias
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([20, 20]);
+            
+            for (let i = 1; i < laneCount; i++) {
+                const x = canvas.width / 2 - roadWidth / 2 + i * laneWidth;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+        }
+
+        // Crear un auto enemigo asegurando que haya espacio para pasar
+        function createEnemy(timestamp) {
+            if (timestamp - lastEnemyTime < enemyFrequency) return;
+            lastEnemyTime = timestamp;
+            
+            // Verificar qué carriles están ocupados en la parte superior
+            const occupiedLanes = new Set();
+            enemies.forEach(enemy => {
+                if (enemy.y < carHeight * 1.5) { // Solo considerar autos cerca de la parte superior
+                    occupiedLanes.add(enemy.lane);
+                }
+            });
+            
+            // Si todos los carriles están ocupados, no crear nuevo auto
+            if (occupiedLanes.size >= laneCount) return;
+            
+            // Elegir un carril disponible aleatorio
+            let availableLanes = [];
+            for (let i = 0; i < laneCount; i++) {
+                if (!occupiedLanes.has(i)) {
+                    availableLanes.push(i);
+                }
+            }
+            
+            const lane = availableLanes[Math.floor(Math.random() * availableLanes.length)];
+            const x = canvas.width / 2 - roadWidth / 2 + lane * laneWidth + (laneWidth - carWidth) / 2;
+            
+            enemies.push({
+                x: x,
+                y: -carHeight,
+                width: carWidth,
+                height: carHeight,
+                lane: lane,
+                color: `hsl(${Math.random() * 360}, 70%, 50%)` // Colores aleatorios
+            });
+        }
+
+        // Dibujar autos enemigos
+        function drawEnemies() {
+            enemies.forEach(enemy => {
+                // Cuerpo del auto
+                ctx.fillStyle = enemy.color;
+                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                
+                // Detalles del auto
+                ctx.fillStyle = '#333';
+                // Ventanas
+                ctx.fillRect(enemy.x + 5, enemy.y + 5, enemy.width - 10, enemy.height / 3);
+                // Luces
+                ctx.fillStyle = '#f39c12';
+                ctx.fillRect(enemy.x + 5, enemy.y + 5, 10, 10);
+                ctx.fillRect(enemy.x + enemy.width - 15, enemy.y + 5, 10, 10);
+            });
+        }
+
+        // Mover autos enemigos
+        function moveEnemies() {
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                enemies[i].y += enemySpeed;
+                
+                // Eliminar autos que salieron de la pantalla
+                if (enemies[i].y > canvas.height) {
+                    enemies.splice(i, 1);
+                    score++;
+                    scoreDisplay.textContent = `Puntaje: ${score}`;
+                }
+            }
+        }
+
+        // Detectar colisiones
+        function checkCollisions() {
+            const playerCar = {
+                x: carX,
+                y: carY,
+                width: carWidth,
+                height: carHeight
+            };
+            
+            for (let enemy of enemies) {
+                if (
+                    playerCar.x < enemy.x + enemy.width &&
+                    playerCar.x + playerCar.width > enemy.x &&
+                    playerCar.y < enemy.y + enemy.height &&
+                    playerCar.y + playerCar.height > enemy.y
+                ) {
+                    gameOver();
+                    break;
+                }
+            }
+        }
+
+        // Game over
+        function gameOver() {
+            gameRunning = false;
+            gameOverDisplay.style.display = 'block';
+        }
+
+        // Reiniciar juego
+        function resetGame() {
+            enemies = [];
+            carLane = 3; // Carril central (de 0 a 6)
+            carX = canvas.width / 2 - roadWidth / 2 + carLane * laneWidth + (laneWidth - carWidth) / 2;
+            score = 0;
+            scoreDisplay.textContent = `Puntaje: ${score}`;
+            enemySpeed = 3;
+            gameRunning = true;
+            gameOverDisplay.style.display = 'none';
+            lastEnemyTime = 0;
+        }
+
+        // Actualizar juego
+        function update(timestamp) {
+            if (!gameRunning) return;
+            
+            // Limpiar canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Dibujar elementos
+            drawRoad();
+            drawCar();
+            drawEnemies();
+            
+            // Mover autos enemigos
+            moveEnemies();
+            
+            // Crear nuevos autos enemigos
+            createEnemy(timestamp);
+            
+            // Aumentar dificultad
+            if (score > 0 && score % 5 === 0) {
+                enemySpeed = 3 + Math.floor(score / 5) * 0.5;
+                enemyFrequency = Math.max(300, 1000 - Math.floor(score / 5) * 50);
+            }
+            
+            // Verificar colisiones
+            checkCollisions();
+            
+            // Mover auto del jugador a la posición correcta del carril
+            const targetX = canvas.width / 2 - roadWidth / 2 + carLane * laneWidth + (laneWidth - carWidth) / 2;
+            carX += (targetX - carX) * 0.2; // Movimiento más suave
+            
+            requestAnimationFrame(update);
+        }
+
+        // Eventos de teclado
+        document.addEventListener('keydown', (e) => {
+            if (e.key === ' ' && !gameRunning) {
+                resetGame();
+                requestAnimationFrame(update);
+            }
+            
+            if (!gameRunning) return;
+            
+            if (e.key === 'ArrowLeft' && carLane > 0) {
+                carLane--;
+            } else if (e.key === 'ArrowRight' && carLane < laneCount - 1) {
+                carLane++;
+            }
+        });
+
+        // Iniciar juego
+        resetGame();
+        requestAnimationFrame(update);
+    </script>
+</body>
+</html>
